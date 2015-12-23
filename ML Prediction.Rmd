@@ -1,0 +1,186 @@
+---
+title: "ML Prediction"
+author: "Janus"
+date: "Wednesday, December 23, 2015"
+output: html_document
+---
+####Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+
+####Data 
+
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+####Data Cleaning
+
+```{r}
+#Loading data 
+setwd("C:/Users/ITSUPPORT/Desktop/R/M8")
+training <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+testing  <- read.csv("pml-testing.csv",  na.strings = c("NA", "#DIV/0!", ""))
+```
+
+```{r, echo=FALSE}
+str(training, list.len=15)
+```
+
+```{r}
+table(training$classe)
+
+```
+
+```{r}
+prop.table(table(training$user_name, training$classe), 1)
+```
+
+```{r}
+prop.table(table(training$classe))
+```
+
+```{r}
+training <- training[, 7:160]
+testing  <- testing[, 7:160]
+```
+
+```{r}
+is_data  <- apply(!is.na(training), 2, sum) > 19621  # which is the number of observations
+training <- training[, is_data]
+testing  <- testing[, is_data]
+```
+
+Here to split the training set into two for cross validation purposes. We randomly subsample 60% of the set for training purposes (actual model building), while the 40% remainder will be used only for testing, evaluation and accuracy measurement.
+
+```{r}
+library(caret)
+```
+
+```{r}
+set.seed(3141592)
+inTrain <- createDataPartition(y=training$classe, p=0.60, list=FALSE)
+train1  <- training[inTrain,]
+train2  <- training[-inTrain,]
+dim(train1)
+
+```
+
+```{r}
+dim(train2)
+
+```
+
+The [i] identify the "zero covariates"" from train1 and [ii] remove these "zero covariates"" from both train1 and train2:
+
+```{r}
+nzv_cols <- nearZeroVar(train1)
+if(length(nzv_cols) > 0) {
+  train1 <- train1[, -nzv_cols]
+  train2 <- train2[, -nzv_cols]
+}
+dim(train1)
+```
+
+```{r}
+dim(train2)
+
+```
+
+```{r}
+library(randomForest)
+```
+
+```{r}
+set.seed(3141592)
+fitModel <- randomForest(classe~., data=train1, importance=TRUE, ntree=100)
+varImpPlot(fitModel)
+```
+
+```{r}
+correl = cor(train1[,c("yaw_belt","roll_belt","num_window","pitch_belt","magnet_dumbbell_z","magnet_dumbbell_y","pitch_forearm","accel_dumbbell_y","roll_arm","roll_forearm")])
+diag(correl) <- 0
+which(abs(correl)>0.75, arr.ind=TRUE)
+```
+
+```{r}
+cor(train1$roll_belt, train1$yaw_belt)
+```
+
+The quick tree classifier selects roll_belt as the first discriminant among all 53 covariates
+
+```{r}
+library(rpart.plot)
+```
+
+```{r}
+fitModel <- rpart(classe~., data=train1, method="class")
+prp(fitModel)
+```
+
+####Mideling
+
+Here to using a Random Forest algorithm, using the train() function from the caret package.
+
+```{r}
+set.seed(3141592)
+fitModel <- train(classe~roll_belt+num_window+pitch_belt+magnet_dumbbell_y+magnet_dumbbell_z+pitch_forearm+accel_dumbbell_y+roll_arm+roll_forearm,
+                  data=train1,
+                  method="rf",
+                  trControl=trainControl(method="cv",number=2),
+                  prox=TRUE,
+                  verbose=TRUE,
+                  allowParallel=TRUE)
+```
+
+```{r}
+saveRDS(fitModel, "modelRF.Rds")
+```
+
+```{r}
+fitModel <- readRDS("modelRF.Rds")
+```
+
+```{r}
+predictions <- predict(fitModel, newdata=train2)
+confusionMat <- confusionMatrix(predictions, train2$classe)
+confusionMat
+```
+
+```{r}
+missClass = function(values, predicted) {
+  sum(predicted != values) / length(values)
+}
+OOS_errRate = missClass(train2$classe, predictions)
+OOS_errRate
+```
+
+####Final submission 
+
+```{r}
+predictions <- predict(fitModel, newdata=testing)
+testing$classe <- predictions
+
+submit <- data.frame(problem_id = testing$problem_id, classe = predictions)
+write.csv(submit, file = "coursera-submission.csv", row.names = FALSE)
+
+answers = testing$classe
+write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_",i,".txt")
+    write.table(x[i], file=filename, quote=FALSE, row.names=FALSE, col.names=FALSE)
+  }
+}
+write_files(answers)
+```
+
